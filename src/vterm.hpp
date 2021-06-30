@@ -289,7 +289,7 @@ public:
                  */
                 fbink_wait_for_complete(fbfd, LAST_MARKER);
                 /* NOTE: This is still potentially racy, and *may* fail. (i.e., we *could* retry on non-zero return codes) */
-                fbink_cls(fbfd, &config, nullptr);
+                fbink_cls(fbfd, &config, nullptr, false);
                 fbink_wait_for_complete(fbfd, LAST_MARKER);
             }
             if (res & OK_LAYOUT_CHANGE) {
@@ -488,7 +488,7 @@ public:
         config.fontname = get_font(fontname);
         config.fontmult = fontmult;
         fbink_init(fbfd, &config);
-        fbink_cls(fbfd, &config, nullptr);
+        fbink_cls(fbfd, &config, nullptr, false);
         fbink_get_state(&config, &state);
         config.is_quiet = true;
         config.is_verbose = false;
