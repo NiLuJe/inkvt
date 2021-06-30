@@ -30,17 +30,6 @@
 
 // reset high_throughput_mode check every <n> ms
 constexpr int INTERVAL_MS = 100;
-// on my laptop, throughput on high output programs
-// is ~ 300k output_char() calls per 100ms
-// on the kobo, random values between 4k and 14k
-#ifdef TARGET_KOBO
-// FIXME: Make it dynamic, and compute it based on maxcols x maxrows to make it a screenful?
-//        (e.g., currently, at default settings, on a Forma, that'd be 90x46 or 90x59 depending on whether the OSK is enabled).
-//        That'd render the double-disable workaround in tick superfluous.
-constexpr long HIGH_THROUGHPUT_THRESHOLD = 3000;
-#else
-constexpr long HIGH_THROUGHPUT_THRESHOLD = 100000;
-#endif
 // after <n> consecutive ticks of the timer without writes
 // disable timer (sleep) mode, to save battery life
 constexpr int TIMER_SLEEP_MODE_THRESHOLD = 10;
@@ -59,6 +48,7 @@ public:
     VTermScreenCallbacks vtsc;
 
     // timer to detect huge output streams
+    long high_throughput_threshold = 100000;
     int timerfd = -1;
     long nwrites_in_interval = 0;
     bool high_throughput_mode = false;
@@ -253,15 +243,12 @@ public:
     }
 
     void tick() {
-        if (high_throughput_mode && nwrites_in_interval < HIGH_THROUGHPUT_THRESHOLD) {
+        if (high_throughput_mode && nwrites_in_interval < high_throughput_threshold) {
             high_throughput_mode = false;
             VTermRect full_refresh = { 0, 0, 0, 0 };
             full_refresh.end_col = ncols();
             full_refresh.end_row = nrows();
             term_damage(full_refresh, this);
-            // Make sure term_damage doesn't re-trip high throughput mode,
-            // in case HIGH_THROUGHPUT_THRESHOLD is lower than ncols() by nrows()
-            high_throughput_mode = false;
         }
         if (nwrites_in_interval == 0) {
             nticks_without_output += 1;
@@ -284,6 +271,8 @@ public:
                 /* Update the state to track the new rotation */
                 fbink_get_state(&config, &state);
                 printf("fbink_reinit w/ ROTA_CHANGE\n");
+                /* Update the high throughput threshold */
+                high_throughput_threshold = state.max_cols * state.max_rows;
                 /* Clear screen and wait to make sure we get rid of potential broken updates
                  * that might have been sent against the wrong state (i.e., race during the rotation).
                  */
@@ -326,9 +315,9 @@ public:
         nwrites_in_interval += 1;
         if (timer_is_running) {
             if (high_throughput_mode) return;
-            if (nwrites_in_interval > HIGH_THROUGHPUT_THRESHOLD) {
+            if (nwrites_in_interval >= high_throughput_threshold) {
                 high_throughput_mode = true;
-                // fprintf(stdout, "Enabling high_throughput_mode (%ld > %ld)\n", nwrites_in_interval, HIGH_THROUGHPUT_THRESHOLD);
+                // fprintf(stdout, "Enabling high_throughput_mode (%ld >= %ld)\n", nwrites_in_interval, high_throughput_threshold);
             }
         } else {
             run_timer();
@@ -493,6 +482,8 @@ public:
         config.is_quiet = true;
         config.is_verbose = false;
         fbink_update_verbosity(&config);
+        /* Set the high throughput threshold at a screenful */
+        high_throughput_threshold = state.max_cols * state.max_rows;
 
         // None of the dithering mechanisms deal very well with tiny refresh regions, so,
         // this doesn't really work all that well... :/
